@@ -3,13 +3,13 @@ from flask import Flask, jsonify, request
 
 app = Flask("Bank_rest_api_app")
 
-#connection as global argument because it's small app with local server
+# connection as global argument because it's small app with local server
 conn = psycopg2.connect(host="localhost",
                         port=5432,
                         database="bank",
                         user="postgres",
                         password="tkt@200974467"
-)
+                        )
 
 
 @app.route("/api/v1/customers/<int:customer_id>", methods=['GET'])
@@ -18,7 +18,7 @@ def get_customer(customer_id):
     with conn:
         with conn.cursor() as cur:
             sql = f"select * from customers where id = %s"
-            cur.execute(sql, (customer_id, ))
+            cur.execute(sql, (customer_id,))
             result = cur.fetchone()
             if result:
                 ret_data = {
@@ -42,7 +42,7 @@ def get_customer_accounts(customer_id):
                   f"join account_holder ah on ah.customer_id = c.id " \
                   f"join accounts a on ah.account_id = a.id " \
                   f"where c.id=%s"
-            cur.execute(sql, (customer_id, ))
+            cur.execute(sql, (customer_id,))
             results = cur.fetchall()
             if results:
                 ret_data = {
@@ -59,18 +59,33 @@ def get_customer_accounts(customer_id):
 def get_all_customers():
     # ?page_num=1&results_per_page=20
     # “FILTER”:
-    # GET /api/v1/customers?city=Tel-Aviv&name_contains=Aynbinder&page_num=2&results_per_page=20
+    # GET /api/v1/customers?address=Tel-Aviv&name_contains=Aynbinder&page_num=2&results_per_page=20
     print(f"called api/v1/customers")
     with conn:
         with conn.cursor() as cur:
-            sql = f"select * from customers"
-            cur.execute(sql)
+            if len(request.args) == 0:
+            # print(len(request.args))
+            # for arg in request.args:
+            #     print(arg)
+                sql = f"select * from customers"
+            if len(request.args) > 0:
+                update_str_list = []
+                for arg in request.args:
+                    update_str_list.append(f"{arg}=%s")
+                sql = f"select * from customers where {('and '.join(update_str_list))}"
+            cur.execute(sql, tuple(request.args.values()))
             results = cur.fetchall()
             if results:
                 ret_data = {
                     'total customers': len(results),
-                    'customers': results
+                    'customers': []}
+                for r in results:
+                    ret_data_r = {'id': r[0],
+                                  'passport_num': r[1],
+                                  'name': r[2],
+                                  'address': r[3]
                 }
+                    ret_data['customers'].append(ret_data_r)
                 return jsonify(ret_data)
             else:
                 return app.response_class(status=404)
@@ -126,7 +141,7 @@ def delete_customer(customer_id):
     with conn:
         with conn.cursor() as cur:
             sql = f"delete from customers where id=%s"
-            cur.execute(sql, (customer_id, ))
+            cur.execute(sql, (customer_id,))
             if cur.rowcount == 1:
                 updated_obj = "select * from customers"
                 cur.execute(updated_obj, )
