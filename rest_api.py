@@ -18,6 +18,10 @@ conn = psycopg2.connect(host="localhost",
 
 @app.route("/api/v1/customers/<int:customer_id>", methods=['GET'])
 def get_customer(customer_id):
+    """
+        The function returns details about customer by customer_id
+        """
+
     print(f"called /customers/customer_id/{customer_id}")
     with conn:
         with conn.cursor() as cur:
@@ -39,6 +43,9 @@ def get_customer(customer_id):
 
 @app.route("/api/v1/customers/<int:customer_id>/accounts", methods=['GET'])
 def get_customer_accounts(customer_id):
+    """
+        The function returns all customer's accounts
+        """
     print(f"called /customers/customer_id/{customer_id}/accounts")
     with conn:
         with conn.cursor() as cur:
@@ -61,27 +68,40 @@ def get_customer_accounts(customer_id):
 
 @app.route("/api/v1/customers", methods=['GET'])
 def get_all_customers():
+    """
+        The function get query params and returns all customers (with filter if passed)
+        params: page_num, results_per_page, passport_num, name_customer, address
+        """
     # ?page_num=1&results_per_page=20
     # “FILTER”:
     # GET /api/v1/customers?address=Tel-Aviv&name_contains=Aynbinder&page_num=2&results_per_page=20
+
     print(f"called api/v1/customers")
+
+    page_num = request.args.get('page_num')
+    results_per_page = request.args.get('results_per_page')
+    default_num_page = 20
+    update_str_list = []
+    values_list = []
+    for arg in request.args:
+        if arg != 'page_num' and arg != 'results_per_page':
+            update_str_list.append(f"{arg} ilike %s")
+            values = request.args.get(arg)
+            values_list.append(f"%{values}%")
     with conn:
         with conn.cursor() as cur:
-            if len(request.args) == 0:
+            if len(update_str_list) == 0:
                 sql = f"select * from customers"
-            if len(request.args) > 0:
-                update_str_list = []
-                values_list = []
-                for arg in request.args:
-                    update_str_list.append(f"{arg} ilike %s")
-                    values = request.args.get(arg)
-                    values_list.append(f"%{values}%")
+            if len(update_str_list) > 0:
                 sql = f"select * from customers where {(' and '.join(update_str_list))}"
             cur.execute(sql, tuple(values_list))
-            results = cur.fetchall()
+            if results_per_page:
+                results = cur.fetchmany(int(results_per_page))
+            else:
+                results = cur.fetchmany(default_num_page)
             if results:
                 ret_data = {
-                    'total customers': len(results),
+                    'total customers in this page': len(results),
                     'customers': []}
                 for r in results:
                     ret_data_r = {'id': r[0],
@@ -97,6 +117,10 @@ def get_all_customers():
 
 @app.route("/api/v1/customers", methods=['POST'])
 def create_new_customer():
+    """
+      The function create new customer
+      params: passport_num -> int, customer_name -> str with '' address -> str with ''
+      """
     # details in request body
     new_data = request.form
     str_list = []
@@ -119,6 +143,9 @@ def create_new_customer():
 
 @app.route("/api/v1/customers/<int:customer_id>", methods=['PUT'])
 def update_customer_data(customer_id):
+    """
+        the function updtes cutomer's details. gets customer_id and query params
+        """
     # details in request body
     new_data = request.form
     # request.form is kind of dictionary
@@ -158,6 +185,9 @@ def delete_customer(customer_id):
 
 @app.route("/api/v1/accounts/<int:account_id>", methods=['GET'])
 def get_account(account_id):
+    """
+      The function returns account's details by account_id
+      """
     print(f"called /accounts/account_id/{account_id}")
     with conn:
         with conn.cursor() as cur:
@@ -210,45 +240,58 @@ def get_all_accounts():
                 return app.response_class(status=404)
 
 
-@app.route("/api/v1/accounts/<int:customer_id>", methods=['POST'])
-def create_new_account(customer_id):
+@app.route("/api/v1/accounts", methods=['POST'])
+def create_new_account():
+    """
+       The function create new account
+       params: customer_id -> int: The customer for whom you want to open an account,
+               max_limit -> int, balance -> int
+       """
     # given customer{s)_id, random an account number, update account_holder table and accounts table
     # details in request body
     new_data = request.form
-    print(request.form)
+    customers = []
+    for c in new_data['customer_id'].split(', '):
+        customers.append(int(c))
+
+    random_account_num = random.randint(10000, 99999)
     str_list = []
+    values_list = []
     for field in new_data:
-        str_list.append(field)
+        if field == 'account_num':
+            str_list.append(field)
+            values_list.append(random_account_num)
+        if field != 'customer_id' and field != 'account_num':
+            str_list.append(field)
+            values_list.append(new_data[field])
+
+    sql = f"insert into accounts ({','.join(str_list)}) values(%s, %s, %s);"
+    a_id_sql = f"select id from accounts where account_num = %s"
+    ah_sql = f"insert into account_holder (account_id, customer_id) values (%s, %s)"
+
     with conn:
         with conn.cursor() as cur:
-            # while True:
-            random_account_num = random.randint(10000, 99999)
-            #     validate_num = f"select * from accounts where account_num = %s"
-            #     cur.execute(validate_num, (str(random_account_num), ))
-            #     # check that account_num is valid (not in the bank yet)
-            #     if cur.rowcount != 0:
-            #         break
-            sql = f"insert into accounts (account_num, {','.join(str_list)})" \
-                f"values({random_account_num}, %s, %s);"
-            cur.execute(sql, tuple(new_data.values()))
+            cur.execute(sql, (tuple(values_list)))
             print(f"created account number {random_account_num}")
             if cur.rowcount == 1:
                 updated_obj = "select * from accounts"
                 cur.execute(updated_obj, )
                 results = cur.fetchall()
-                print(results)
+                print(f"accounts: {results}")
             # get new_account_id:
-            a_id_sql = f"select id from accounts where account_num = %s"
             cur.execute(a_id_sql, (str(random_account_num), ))
             account_id = cur.fetchone()
             # add to account_holder table:
-            ah_sql = f"insert into account_holder (account_id, customer_id) values (%s, %s)"
-            cur.execute(ah_sql, (account_id, customer_id))
-            if cur.rowcount == 1:
+            counter = 0
+            for customer in customers:
+                cur.execute(ah_sql, (account_id, customer))
+                if cur.rowcount == 1:
+                    counter += 1
+            if counter == len(customers):
                 updated_ah = "select * from account_holder"
                 cur.execute(updated_ah, )
                 ah_results = cur.fetchall()
-                print(ah_results)
+                print(f"account_holder: {ah_results}")
                 return app.response_class(status=200)
     return app.response_class(status=500)
 
