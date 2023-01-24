@@ -1,3 +1,4 @@
+import datetime
 import random
 
 import psycopg2
@@ -218,11 +219,17 @@ def create_new_account(customer_id):
     str_list = []
     for field in new_data:
         str_list.append(field)
-    random_account_num = random.randint(10000, 99999)
-    sql = f"insert into accounts (account_num, {','.join(str_list)})" \
-          f"values({random_account_num}, %s, %s);"
     with conn:
         with conn.cursor() as cur:
+            # while True:
+            random_account_num = random.randint(10000, 99999)
+            #     validate_num = f"select * from accounts where account_num = %s"
+            #     cur.execute(validate_num, (str(random_account_num), ))
+            #     # check that account_num is valid (not in the bank yet)
+            #     if cur.rowcount != 0:
+            #         break
+            sql = f"insert into accounts (account_num, {','.join(str_list)})" \
+                f"values({random_account_num}, %s, %s);"
             cur.execute(sql, tuple(new_data.values()))
             print(f"created account number {random_account_num}")
             if cur.rowcount == 1:
@@ -267,9 +274,9 @@ def deposit(account_id):
 
 @app.route("/api/v1/accounts/<int:account_id>/withdraw", methods=['POST'])
 def withdraw(account_id):
-    # Body: amount
+    # Body: amount. check there's enough money in account depends on limit
+    # if OK - update account balance, update in transactions table
     new_data = request.form
-    # request.form is kind of dictionary
 
     with conn:
         with conn.cursor() as cur:
@@ -281,16 +288,32 @@ def withdraw(account_id):
                 cur.execute(sql_limit, (account_id,))
                 limit = cur.fetchone()
                 if limit:
-                    if balance[0] - float(new_data['amount']) > limit[0]:
-                        sql = f"update accounts set balance = balance - %s where id=%s"
-                        cur.execute(sql, tuple(new_data.values()) + tuple([account_id]))
-                        print(f"withdraw from account no. {account_id}")
+                    if balance[0] - float(new_data['amount']) < limit[0]:
+                        raise Exception("The withdrawal exceeds the limit")
+                    sql = f"update accounts set balance = balance - %s where id=%s"
+                    cur.execute(sql, tuple(new_data.values()) + tuple([account_id]))
+                    print(f"withdraw from account no. {account_id}")
+                    if cur.rowcount == 1:
+                        updated_obj = "select * from accounts"
+                        cur.execute(updated_obj, )
+                        results = cur.fetchall()
+                        print(f"accounts: {results}")
+                        # update transactions table:
+                        transaction_time = datetime.datetime.now()
+                        update_transactions = f"insert into transactions " \
+                                              f"(transaction_type, transaction_time, amount, " \
+                                              f"performer_customer_id, performer_account_id) " \
+                                              f"values('withdraw', '{transaction_time}', %s, " \
+                                              f"(select ah.customer_id from account_holder ah " \
+                                              f"where ah.account_id = {account_id})," \
+                                              f"{account_id})"
+                        cur.execute(update_transactions, tuple(new_data.values()))
                         if cur.rowcount == 1:
-                            updated_obj = "select * from accounts"
-                            cur.execute(updated_obj, )
-                            results = cur.fetchall()
-                            print(results)
-                            return app.response_class(status=200)
+                            updated = "select * from transactions"
+                            cur.execute(updated, )
+                            transactions = cur.fetchall()
+                            print(f"transactions: {transactions}")
+                        return app.response_class(status=200)
                 # no data for this customer_id
                 return app.response_class(status=404)
     return app.response_class(status=500)

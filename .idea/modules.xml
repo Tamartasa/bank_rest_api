@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/bank_rest_api.iml" filepath="$PROJECT_DIR$/.idea/bank_rest_api.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../sql6_ex/.idea/sql6_ex.iml" filepath="$PROJECT_DIR$/../sql6_ex/.idea/sql6_ex.iml" />
     </modules>
   </component>
 </project>
