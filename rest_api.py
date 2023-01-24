@@ -1,3 +1,5 @@
+import random
+
 import psycopg2
 from flask import Flask, jsonify, request
 
@@ -65,16 +67,16 @@ def get_all_customers():
     with conn:
         with conn.cursor() as cur:
             if len(request.args) == 0:
-            # print(len(request.args))
-            # for arg in request.args:
-            #     print(arg)
                 sql = f"select * from customers"
             if len(request.args) > 0:
                 update_str_list = []
+                values_list = []
                 for arg in request.args:
-                    update_str_list.append(f"{arg}=%s")
-                sql = f"select * from customers where {('and '.join(update_str_list))}"
-            cur.execute(sql, tuple(request.args.values()))
+                    update_str_list.append(f"{arg} ilike %s")
+                    values = request.args.get(arg)
+                    values_list.append(f"%{values}%")
+                sql = f"select * from customers where {(' and '.join(update_str_list))}"
+            cur.execute(sql, tuple(values_list))
             results = cur.fetchall()
             if results:
                 ret_data = {
@@ -207,9 +209,41 @@ def get_all_accounts():
                 return app.response_class(status=404)
 
 
-@app.route("/api/v1/accounts", methods=['POST'])
-def create_new_account():
-    pass
+@app.route("/api/v1/accounts/<int:customer_id>", methods=['POST'])
+def create_new_account(customer_id):
+    # given customer{s)_id, random an account number, update account_holder table and accounts table
+    # details in request body
+    new_data = request.form
+    print(request.form)
+    str_list = []
+    for field in new_data:
+        str_list.append(field)
+    random_account_num = random.randint(10000, 99999)
+    sql = f"insert into accounts (account_num, {','.join(str_list)})" \
+          f"values({random_account_num}, %s, %s);"
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, tuple(new_data.values()))
+            print(f"created account number {random_account_num}")
+            if cur.rowcount == 1:
+                updated_obj = "select * from accounts"
+                cur.execute(updated_obj, )
+                results = cur.fetchall()
+                print(results)
+            # get new_account_id:
+            a_id_sql = f"select id from accounts where account_num = %s"
+            cur.execute(a_id_sql, (str(random_account_num), ))
+            account_id = cur.fetchone()
+            # add to account_holder table:
+            ah_sql = f"insert into account_holder (account_id, customer_id) values (%s, %s)"
+            cur.execute(ah_sql, (account_id, customer_id))
+            if cur.rowcount == 1:
+                updated_ah = "select * from account_holder"
+                cur.execute(updated_ah, )
+                ah_results = cur.fetchall()
+                print(ah_results)
+                return app.response_class(status=200)
+    return app.response_class(status=500)
 
 
 @app.route("/api/v1/accounts/<int:account_id>/deposit", methods=['POST'])
@@ -264,7 +298,34 @@ def withdraw(account_id):
 
 
 @app.route("/api/v1/accounts/<int:account_id>/transfer", methods=['POST'])
-def transfer():
+def transfer(account_id):
+    new_data = request.form
+    str_list = []
+    for field in new_data:
+        str_list.append(field)
+    with conn:
+        with conn.cursor() as cur:
+            sql_money_in_account = f"select balance from accounts a where id = %s;"
+            cur.execute(sql_money_in_account, (account_id,))
+            balance = cur.fetchone()
+            if balance:
+                sql_limit = f"select max_limit from accounts a where id = %s;"
+                cur.execute(sql_limit, (account_id,))
+                limit = cur.fetchone()
+                if limit:
+                    if balance[0] - float(new_data['amount']) > limit[0]:
+                        sql = f"update accounts set balance = balance - %s where id=%s"
+                        cur.execute(sql, tuple(new_data.values()) + tuple([account_id]))
+                        print(f"withdraw from account no. {account_id}")
+                        if cur.rowcount == 1:
+                            updated_obj = "select * from accounts"
+                            cur.execute(updated_obj, )
+                            results = cur.fetchall()
+                            print(results)
+                            return app.response_class(status=200)
+                # no data for this customer_id
+                return app.response_class(status=404)
+    return app.response_class(status=500)
     # Body: amount, receiving account_id
     pass
 
