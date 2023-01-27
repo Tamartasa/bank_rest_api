@@ -365,35 +365,46 @@ def withdraw(account_id):
 
 @app.route("/api/v1/accounts/<int:account_id>/transfer", methods=['POST'])
 def transfer(account_id):
+    """
+       The function gets query param (amount, receiving account and customer id -> The one who performs the transfer)
+       and update the account balance if it possible
+       """
     new_data = request.form
-    str_list = []
-    for field in new_data:
-        str_list.append(field)
+    print(new_data)
+    transaction_time = datetime.datetime.now()
+
+    sql_money_and_limit = f"select balance, max_limit from accounts a where id = %s;"
+    sql_update_balance = f"update accounts set balance = %s where id=%s"
+    sql_transactions = f"insert into transactions (transaction_type, transaction_time, " \
+                       f"amount, performer_customer_id, performer_account_id, " \
+                       f"receiver_account_id) values('transfer', %s, %s, %s, %s, %s)"
     with conn:
         with conn.cursor() as cur:
-            sql_money_in_account = f"select balance from accounts a where id = %s;"
-            cur.execute(sql_money_in_account, (account_id,))
-            balance = cur.fetchone()
-            if balance:
-                sql_limit = f"select max_limit from accounts a where id = %s;"
-                cur.execute(sql_limit, (account_id,))
-                limit = cur.fetchone()
-                if limit:
-                    if balance[0] - float(new_data['amount']) > limit[0]:
-                        sql = f"update accounts set balance = balance - %s where id=%s"
-                        cur.execute(sql, tuple(new_data.values()) + tuple([account_id]))
-                        print(f"withdraw from account no. {account_id}")
-                        if cur.rowcount == 1:
-                            updated_obj = "select * from accounts"
-                            cur.execute(updated_obj, )
-                            results = cur.fetchall()
-                            print(results)
-                            return app.response_class(status=200)
-                # no data for this customer_id
+            cur.execute(sql_money_and_limit, (account_id,))
+            sender_balance_and_limit = cur.fetchone()
+            sender_balance = sender_balance_and_limit[0]
+            sender_limit = sender_balance_and_limit[1]
+            cur.execute(sql_money_and_limit, (new_data['receiver_account_id'], ))
+            receiver_balance = cur.fetchone()
+            receiver_balance = receiver_balance[0]
+
+            if receiver_balance is None or sender_balance is None or \
+                    sender_balance - float(new_data['amount']) < sender_limit:
                 return app.response_class(status=404)
-    return app.response_class(status=500)
-    # Body: amount, receiving account_id
-    pass
+
+            # update sender account, receiver account:
+            cur.execute(sql_update_balance, (sender_balance - float(new_data['amount']), account_id))
+            cur.execute(sql_update_balance, (receiver_balance + float(new_data['amount']), new_data['receiver_account_id']))
+            # update transactions table:
+            cur.execute(sql_transactions, (f"{transaction_time}", new_data['amount'],
+                                           new_data['costumer_id'], account_id, new_data['receiver_account_id']))
+            if cur.rowcount == 1:
+                updated = "select * from transactions"
+                cur.execute(updated, )
+                transactions = cur.fetchall()
+                print(f"transactions: {transactions}")
+                return app.response_class(status=200)
+            return app.response_class(status=500)
 
 @app.route("/api/v1/accounts/<int:account_id>", methods=['DELETE'])
 def delete_account(account_id):
